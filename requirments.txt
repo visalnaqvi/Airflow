@@ -1,0 +1,10 @@
+psycopg2-binary
+opencv-python
+torch
+pillow
+ultralytics
+insightface
+transformers
+qdrant_client
+numpy
+open-clip-torch
