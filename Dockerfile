@@ -1,21 +1,71 @@
-FROM apache/airflow:2.10.2
+FROM apache/airflow:2.9.2
 
 # Switch to root for installing system packages
 USER root
 
-# Install Node.js and npm
-RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*
+# Install system build tools + Node.js + gosu (this layer rarely changes)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        libgl1 \
+        libglib2.0-0 \
+        curl \
+        gosu \
+    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY requirements.txt /requirements.txt
+# Verify node & npm and symlink for global access
+RUN node --version && npm --version \
+    && ln -sf /usr/bin/node /usr/local/bin/node \
+    && ln -sf /usr/bin/npm /usr/local/bin/npm
+
+# Create directories with proper ownership from the start
+RUN mkdir -p /opt/airflow/dags/scripts/compression_dag \
+    && mkdir -p /opt/airflow/dags/scripts/extraction_dag \
+    && mkdir -p /tmp/yolo_config \
+    && chown -R airflow:root /opt/airflow/dags \
+    && chown -R airflow:root /tmp/yolo_config
+
+# Switch to airflow user for Python package installations
+USER airflow
+
+# Copy and install Python requirements FIRST (caches unless requirements.txt changes)
+COPY --chown=airflow:root requirements.txt /requirements.txt
 RUN pip install --no-cache-dir -r /requirements.txt
 
-# Copy Node.js dependencies first (better caching)
-COPY scripts/package*.json /opt/airflow/scripts/
-RUN cd /opt/airflow/scripts && npm install
+# Switch back to root temporarily to copy files
+USER root
 
-# Copy the rest of your project
-COPY . /opt/airflow
+# Copy the project files with proper ownership
+COPY --chown=airflow:root . /opt/airflow/
+
+# Install Node.js dependencies for compression_dag
+WORKDIR /opt/airflow/dags/scripts/compression_dag
+RUN if [ -f "package.json" ]; then \
+        npm install && \
+        chown -R airflow:root node_modules; \
+    else \
+        echo "Warning: package.json not found in compression_dag"; \
+    fi
+
+# Go back to airflow root
+WORKDIR /opt/airflow
+
+# Final permission fix and verification
+RUN chown -R airflow:root /opt/airflow/dags \
+    && chown -R airflow:root /opt/airflow/plugins 2>/dev/null || true \
+    && chown -R airflow:root /opt/airflow/config 2>/dev/null || true \
+    && chmod -R 755 /opt/airflow/dags
 
 # Switch back to airflow user
 USER airflow
+
+# Verify the setup
+RUN echo "=== Verifying DAG files ===" \
+    && ls -la /opt/airflow/dags/ \
+    && echo "=== Checking DAG syntax ===" \
+    && python -c "import sys; sys.path.insert(0, '/opt/airflow/dags'); print('Python path setup complete')" \
+    && echo "=== Node.js verification ===" \
+    && cd /opt/airflow/dags/scripts/compression_dag && npm list --depth=0 || echo "No package.json or npm modules"

@@ -8,3 +8,4 @@ transformers
 qdrant_client
 numpy
 open-clip-torch
+onnxruntime

@@ -7,10 +7,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 # --- DB Connection Settings ---
 DB_CONFIG = {
-    "dbname": "railway",
-    "user": "your_user",
-    "password": "your_password",
-    "host": "your_host",
+    "dbname": "postgres",
+    "user": "postgres",
+    "password": "admin",
+    "host": "host.docker.internal",
     "port": 5432,
 }
 

@@ -18,6 +18,7 @@ import concurrent.futures
 import numpy as np
 import math
 import open_clip
+import requests
 def _normalize(value, min_val, max_val):
     if max_val <= min_val:
         return 0.0
@@ -138,7 +139,7 @@ class Config:
     
     
     # Qdrant config
-    QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
+    QDRANT_HOST: str = os.getenv("QDRANT_HOST", "host.docker.internal")
     QDRANT_PORT: int = int(os.getenv("QDRANT_PORT", "6333"))
 
 config = Config()
@@ -156,7 +157,7 @@ def get_db_connection():
     conn = None
     try:
         conn = psycopg2.connect(
-        host="localhost",
+        host="host.docker.internal",
         port="5432",
         dbname="postgres",
         user="postgres",
@@ -181,7 +182,7 @@ class DatabaseManager:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id, image_byte FROM images WHERE status = 'warm' AND group_id = %s LIMIT %s", 
+                    "SELECT id, location FROM images WHERE status = 'warm' AND group_id = %s LIMIT %s", 
                     (group_id, batch_size)
                 )
                 return cur.fetchall()
@@ -334,13 +335,25 @@ class HybridFaceIndexer:
         except Exception as e:
             logger.error(f"Failed to convert image to bytes: {e}")
             raise
-
-    def process_image(self, image_id: int, image_bytes: bytes, yolo_model, collection_name: str) -> List[dict]:
+        
+    def read_image_from_url(self , url: str):
+        # Download the image
+        response = requests.get(url, stream=True)
+        response.raise_for_status()  # will throw error if invalid
+        
+        # Convert to numpy array
+        image_array = np.asarray(bytearray(response.content), dtype=np.uint8)
+        
+        # Decode to OpenCV image (BGR format)
+        img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+        
+        return img   
+         
+    def process_image(self, image_id: int, location: str, yolo_model, collection_name: str) -> List[dict]:
         """Process single image with comprehensive error handling"""
         try:
             # Decode image
-            nparr = np.frombuffer(image_bytes, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            img = self.read_image_from_url(location)
             
             if img is None:
                 logger.warning(f"Failed to decode image {image_id}")
@@ -454,8 +467,8 @@ class HybridFaceIndexer:
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=config.PARALLEL_LIMIT) as executor:
             futures = {
-                executor.submit(self.process_image, img_id, img_bytes, yolo_model, collection_name): img_id
-                for img_id, img_bytes in images_batch
+                executor.submit(self.process_image, img_id, location, yolo_model, collection_name): img_id
+                for img_id, location in images_batch
             }
             
             for future in concurrent.futures.as_completed(futures):

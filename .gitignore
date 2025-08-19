@@ -1,2 +1,3 @@
 /venv
 /logs
+/dags/scripts/compression_dag/node_modules

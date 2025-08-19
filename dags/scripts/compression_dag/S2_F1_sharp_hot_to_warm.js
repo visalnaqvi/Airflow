@@ -14,7 +14,8 @@ admin.initializeApp({
 const bucket = admin.storage().bucket();
 
 const pool = new Pool({
-    connectionString: "postgresql://postgres:AfldldzckDWtkskkAMEhMaDXnMqknaPY@ballast.proxy.rlwy.net:56193/railway"
+    // connectionString: "postgresql://postgres:AfldldzckDWtkskkAMEhMaDXnMqknaPY@ballast.proxy.rlwy.net:56193/railway"
+    connectionString: "postgresql://postgres:admin@host.docker.internal:5432/postgres"
 });
 
 // Configuration
@@ -147,15 +148,19 @@ async function performBatchUpdate(client, successfulResults) {
     }
 
     const batchUpdateQuery = `
-        UPDATE images 
-        SET status = data.status,
+  UPDATE images 
+  SET 
+    status = data.status,
     json_meta_data = data.json_meta_data,
     thumb_byte = data.thumb_byte,
     image_byte = data.image_byte,
     last_processed_at = NOW()
-FROM(VALUES ${valuesClauses.join(', ')}) AS data(id, status, json_meta_data, thumb_byte, image_byte)
-        WHERE images.id = data.id
-    `;
+  FROM (
+    VALUES ${valuesClauses.join(', ')}
+  ) AS data(id, status, json_meta_data, thumb_byte, image_byte)
+  WHERE images.id = data.id
+`;
+
 
     console.log(`🔃 Executing batch query with ${allParams.length} parameters...`);
     const startTime = Date.now();
@@ -200,7 +205,8 @@ async function performChunkedUpdates(client, successfulResults) {
                          SET status = $1,
     json_meta_data = $2,
     thumb_byte = $3,
-    image_byte = $4
+    image_byte = $4,
+    last_processed_at = NOW()
                          WHERE id = $5`,
                         [data.status, data.json_meta_data, data.thumb_byte, data.image_byte, id]
                     );
@@ -251,12 +257,12 @@ async function updateDatabaseBatch(client, results) {
 
         // Begin transaction for batch update
         await client.query('BEGIN');
-        await performBatchUpdate(client, successfulResults, "success");
-        await performBatchUpdate(client, failedResults, "failure");
+        await performChunkedUpdates(client, successfulResults);
+        await performChunkedUpdates(client, failedResults);
         await client.query('COMMIT');
 
     } catch (batchError) {
-        console.log(`⚠️  Batch UPDATE failed: ${batchError.message} `);
+        console.log(`⚠️  Chunck UPDATE failed: ${batchError.message} `);
 
         // Rollback the failed batch transaction with timeout
         try {
@@ -286,83 +292,57 @@ async function updateDatabaseBatch(client, results) {
                 // Note: In a production system, you might want to get a new connection here
             }
         }
-
-        // Try chunked updates in a new transaction
-        try {
-            console.log(`🔃 Falling back to chunked updates...`);
-            await client.query('BEGIN');
-            await performChunkedUpdates(client, successfulResults);
-            await client.query('COMMIT');
-
-        } catch (chunkError) {
-            console.log(`⚠️  Chunk UPDATE failed: ${chunkError.message} `);
-
-            // Rollback the chunked transaction with timeout
+        for (const result of results) {
             try {
-                console.log(`🔃 Starting chunked update rollback`);
-
-                const rollbackPromise = client.query('ROLLBACK');
-                const rollbackTimeout = new Promise((_, reject) => {
-                    setTimeout(() => reject(new Error('Chunked rollback timeout after 10 seconds')), 180000);
-                });
-
-                await Promise.race([rollbackPromise, rollbackTimeout]);
-                console.log(`✅ Chunked update rollback completed`);
-
-            } catch (rollbackError) {
-                console.log(`⚠️  Chunk rollback error: ${rollbackError.message} `);
-            }
-
-            // Try individual updates as last resort
-            console.log(`🔃 Falling back to individual updates...`);
-            let individualSuccessCount = 0;
-
-            for (const result of successfulResults) {
-                try {
-                    await client.query('BEGIN');
-                    const { id, data } = result;
-                    const updateResult = await client.query(
-                        `UPDATE images
+                await client.query('BEGIN');
+                const { id, data } = result;
+                const updateResult = await client.query(
+                    `UPDATE images
                          SET status = $1,
     json_meta_data = $2,
     thumb_byte = $3,
-    image_byte = $4
+    image_byte = $4,
+    last_processed_at = NOW()
                          WHERE id = $5`,
-                        [data.status, data.json_meta_data, data.thumb_byte, data.image_byte, id]
-                    );
-                    await client.query('COMMIT');
+                    [data.status, data.json_meta_data, data.thumb_byte, data.image_byte, id]
+                );
+                await client.query('COMMIT');
 
-                    if (updateResult.rowCount > 0) {
-                        individualSuccessCount++;
-                    }
-                } catch (individualError) {
-                    console.error(`❌ Failed to update image ${result.id}: `, individualError.message);
-                    try {
-                        const rollbackPromise = client.query('ROLLBACK');
-                        const rollbackTimeout = new Promise((_, reject) => {
-                            setTimeout(() => reject(new Error('Individual rollback timeout after 5 seconds')), 180000);
-                        });
-                        await Promise.race([rollbackPromise, rollbackTimeout]);
-                    } catch (rollbackError) {
-                        console.log(`⚠️  Individual rollback error: ${rollbackError.message} `);
-                    }
+                if (updateResult.rowCount > 0) {
+                    individualSuccessCount++;
+                }
+            } catch (individualError) {
+                console.error(`❌ Failed to update image ${result.id}: `, individualError.message);
+                try {
+                    const rollbackPromise = client.query('ROLLBACK');
+                    const rollbackTimeout = new Promise((_, reject) => {
+                        setTimeout(() => reject(new Error('Individual rollback timeout after 5 seconds')), 180000);
+                    });
+                    await Promise.race([rollbackPromise, rollbackTimeout]);
+                } catch (rollbackError) {
+                    console.log(`⚠️  Individual rollback error: ${rollbackError.message} `);
+                    process.exit(1)
                 }
             }
-
-            console.log(`✅ Successfully updated ${individualSuccessCount}/${successfulResults.length} images using individual updates`);
         }
     }
 }
 
 // Fetch all hot images for a specific group
 async function fetchAllHotImages(client, groupId) {
-    const { rows } = await client.query(
-        `SELECT id, location, group_id FROM images 
+    try {
+        const { rows } = await client.query(
+            `SELECT id, location, group_id FROM images 
          WHERE status = 'hot' AND group_id = $1 
          ORDER BY id limit 100`,
-        [groupId]
-    );
-    return rows;
+            [groupId]
+        );
+        return rows;
+    } catch (e) {
+        console.log("Got error while fetching hot images")
+        process.exit(1)
+    }
+
 }
 
 // Process images in batches of BATCH_SIZE with database update after each batch
@@ -410,6 +390,16 @@ async function processGroup(client, groupId) {
     console.log(`🔃 Starting processing for group ${groupId}`);
     let totalProcessedFinal = []
     let totalFailedFinal = []
+
+    if (groupId == null || groupId == undefined || groupId <= 0) {
+        console.log("Not a valid groupd id")
+        process.exit(1)
+    }
+
+    if (client == null || client == undefined) {
+        console.log("Client not initialized")
+        process.exit(1)
+    }
     while (true) {
         console.log(`🔃 Fetching all hot images for group ${groupId}`);
         const allImages = await fetchAllHotImages(client, groupId);
@@ -433,10 +423,15 @@ async function processGroup(client, groupId) {
 
 async function processImages() {
     const client = await pool.connect();
+
     try {
         while (true) {
             console.log("🔃 Getting hot groups to process images");
-            const { rows: groupRows } = await client.query(`SELECT id FROM groups WHERE status = 'heating' and last_image_uploaded_at is not null order by last_image_uploaded_at LIMIT 1`);
+            const { rows: groupRows } = await client.query(`SELECT group_id
+  FROM images
+  WHERE status = 'hot'
+  ORDER BY uploaded_at ASC
+  LIMIT 1`);
             console.log(`✅ Found ${groupRows.length} hot groups`);
 
             let totalProcessedAllGroups = 0;
@@ -445,7 +440,7 @@ async function processImages() {
                 break;
             }
             for (const group of groupRows) {
-                const processedCount = await processGroup(client, group.id);
+                const processedCount = await processGroup(client, group.group_id);
                 totalProcessedAllGroups += processedCount;
             }
 
@@ -455,6 +450,7 @@ async function processImages() {
 
     } catch (err) {
         console.error('❌ Error processing images:', err);
+        process.exit(1);
     } finally {
         client.release();
         await pool.end();

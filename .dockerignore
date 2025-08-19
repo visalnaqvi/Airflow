@@ -1,0 +1,17 @@
+# Exclude large directories that shouldn't be copied
+node_modules
+dags/scripts/compression_dag/node_modules
+.git
+.gitignore
+*.pyc
+__pycache__
+.pytest_cache
+.coverage
+*.log
+logs/
+*.tmp
+*.swp
+.DS_Store
+.env
+.venv
+venv/
