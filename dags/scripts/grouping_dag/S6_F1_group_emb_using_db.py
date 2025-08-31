@@ -1,6 +1,4 @@
-import os
 import numpy as np
-from scipy.spatial.distance import cosine
 import torch
 from qdrant_client import QdrantClient
 import psycopg2
@@ -11,15 +9,15 @@ from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 
 def get_db_connection():
     return psycopg2.connect(
-        host="localhost",
-        port="5432",
-        dbname="postgres",
+         host="ballast.proxy.rlwy.net",
+        port="56193",
+        dbname="railway",
         user="postgres",
-        password="admin"
+        password="AfldldzckDWtkskkAMEhMaDXnMqknaPY"
     )
 
 class SimplifiedFaceGrouping:
-    def __init__(self, host="localhost", port=6333):
+    def __init__(self, host="host.docker.internal", port=6333):
         self.qdrant = QdrantClient(host=host, port=port)
 
     def get_unassigned_faces_batch(self, group_id, limit=10):
@@ -461,7 +459,24 @@ class SimplifiedFaceGrouping:
         
         print(f"🎉 Batch processing complete! Processed {len(unassigned_face_ids)} faces")
         print(f"   📊 Assignments: {len(face_assignments)}, Similar faces: {len(similar_faces_data)}")
-
+    
+    def mark_group_processed(self , group_id) -> None:
+        """Mark group_id as processed and clear image_byte"""
+        if not group_id:
+            return
+            
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                query = """
+                            UPDATE groups
+                            SET status = 'warmed',
+                    last_processed_at = NOW(),
+                            last_processed_step = 'grouping'
+                            WHERE id = %s AND status = 'warming'
+                        """
+                cur.execute(query, (group_id,))
+                conn.commit()
+                print(f"Marked {group_id} group_id as processed")
     def process_unassigned_faces(self, group_id, batch_size=10):
         """Process all unassigned faces in batches"""
         print(f"🚀 Starting face processing for group {group_id}")
@@ -480,24 +495,7 @@ class SimplifiedFaceGrouping:
             # if remaining_count == initial_count:
             #     print("⚠️ No progress made, stopping to avoid infinite loop")
             #     break
-    def mark_group_processed(self , group_id) -> None:
-        """Mark group_id as processed and clear image_byte"""
-        if not group_id:
-            return
-            
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                query = """
-                            UPDATE groups
-                            SET status = 'warmed',
-                    last_processed_at = NOW(),
-                            last_processed_step = 'grouping'
-                            WHERE id = %s AND status = 'warming'
-                        """
-                cur.execute(query, (group_id,))
-                conn.commit()
-                print(f"Marked {group_id} group_id as processed")
-                
+
     def process_all_groups(self, batch_size=10):
         """Process all warming groups"""
         # Get all warming groups
@@ -520,12 +518,9 @@ class SimplifiedFaceGrouping:
                 print(f"❌ Error processing group {group_id}: {e}")
                 continue
 
-# 🔧 Usage Example
-if __name__ == "__main__":
+
+def groupping():
     grouper = SimplifiedFaceGrouping()
     
-    # Process all groups with batch size of 10
     grouper.process_all_groups(batch_size=10)
     
-    # Or process a specific group
-    # grouper.process_unassigned_faces("specific_group_id", batch_size=10)

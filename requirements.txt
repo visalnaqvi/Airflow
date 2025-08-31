@@ -1,11 +1,6 @@
 psycopg2-binary
-opencv-python
-torch
-pillow
-ultralytics
-insightface
-transformers
 qdrant_client
+firebase-admin
+torch
 numpy
-open-clip-torch
-onnxruntime
+opencv-python

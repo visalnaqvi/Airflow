@@ -3,19 +3,28 @@ FROM apache/airflow:2.9.2
 # Switch to root for installing system packages
 USER root
 
-# Install only the system libraries you actually need
+# Install system build tools + Node.js + gosu (this layer rarely changes)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         cmake \
         libgl1 \
         libglib2.0-0 \
+        curl \
         gosu \
+    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Verify node & npm and symlink for global access
+RUN node --version && npm --version \
+    && ln -sf /usr/bin/node /usr/local/bin/node \
+    && ln -sf /usr/bin/npm /usr/local/bin/npm
+
 # Create directories with proper ownership from the start
-RUN mkdir -p /opt/airflow/dags/scripts/clean_up_dag \
-    && mkdir -p /opt/airflow/dags/scripts/grouping_dag \
+RUN mkdir -p /opt/airflow/dags/scripts/compression_dag \
+    && mkdir -p /opt/airflow/dags/scripts/extraction_dag \
+    && mkdir -p /opt/airflow/dags/scripts/clean_up_dag \
     && mkdir -p /tmp/yolo_config \
     && chown -R airflow:root /opt/airflow/dags \
     && chown -R airflow:root /tmp/yolo_config
@@ -49,4 +58,6 @@ USER airflow
 RUN echo "=== Verifying DAG files ===" \
     && ls -la /opt/airflow/dags/ \
     && echo "=== Checking DAG syntax ===" \
-    && python -c "import sys; sys.path.insert(0, '/opt/airflow/dags'); print('Python path setup complete')"
+    && python -c "import sys; sys.path.insert(0, '/opt/airflow/dags'); print('Python path setup complete')" \
+    && echo "=== Node.js verification ===" \
+    && cd /opt/airflow/dags/scripts/compression_dag && npm list --depth=0 || echo "No package.json or npm modules"

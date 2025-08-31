@@ -1,3 +1,8 @@
 /venv
 /logs
 /dags/scripts/compression_dag/node_modules
+/compression_dag/node_modules
+/compression_dag/__pycache__
+/dags/__pycache__
+/dags/scripts/cleanup_dag/__pycache__
+/dags/scripts/grouping_dag/__pycache__

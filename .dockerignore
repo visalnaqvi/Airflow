@@ -15,3 +15,22 @@ logs/
 .env
 .venv
 venv/
+# Ignore node stuff
+node_modules
+**/node_modules
+npm-debug.log
+yarn.lock
+
+# Ignore Python cache
+__pycache__
+*.pyc
+*.pyo
+
+# Ignore git
+.git
+.gitignore
+
+# Ignore IDE/editor junk
+.vscode
+.idea
+*.swp
