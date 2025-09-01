@@ -19,7 +19,7 @@ default_args = {
 
 # Define the DAG
 with DAG(
-    dag_id="clean_up_dag",
+    dag_id="grouping_dag",
     default_args=default_args,
     description="A simple DAG with PythonOperator",
     schedule_interval=None,
