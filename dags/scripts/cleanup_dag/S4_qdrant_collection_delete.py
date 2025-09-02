@@ -43,5 +43,5 @@ def cleanup_qdrant():
 
     print("✅ Qdrant cleanup complete.")
 
-if __name__ == "__main__":
-    cleanup_qdrant()
+# if __name__ == "__main__":
+#     cleanup_qdrant()

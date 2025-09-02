@@ -47,5 +47,5 @@ def update_group_image_counts():
         cur.close()
         conn.close()
 
-if __name__ == "__main__":
-    update_group_image_counts()
+# if __name__ == "__main__":
+#     update_group_image_counts()
